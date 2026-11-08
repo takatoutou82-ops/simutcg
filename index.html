@@ -11,18 +11,21 @@
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
 header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--ln);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 h1{font-size:18px;margin:0;flex:1;min-width:200px}
-h2{margin:22px 0 8px;font-size:17px}
+h2{margin:24px 0 8px;font-size:17px}
+h2.promo{margin-top:36px;font-size:20px;border-top:2px solid var(--ln);padding-top:16px}
 select,button{font:inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--ln);background:var(--sf);color:var(--ink);cursor:pointer}
 button.p{background:var(--ac);color:var(--act);border:0}
 main{padding:14px 16px 50px;max-width:1100px;margin:0 auto}
-.sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
 .set{background:var(--sf);border:1px solid var(--ln);border-radius:10px;padding:10px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px}
-.set img{max-width:100%;height:46px;object-fit:contain}
+.set img,.set .lg{max-width:100%;height:50px;object-fit:contain}
+.set .lg{display:flex;align-items:center;color:var(--mut);font-size:12px}
 .set small,.mut{color:var(--mut)}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
 .cards img,.ph{width:100%;aspect-ratio:63/88;border-radius:6px;background:var(--sf);cursor:pointer;display:block}
 .ph{border:2px dashed var(--ln);display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;padding:6px;color:var(--mut)}
-.cards figure{margin:0;font-size:12px;text-align:center}
+.cards figure{margin:0;font-size:12px;text-align:center;position:relative}
+figure[data-b]::after{content:attr(data-b);position:absolute;top:4px;right:4px;background:#000a;color:#fff;font-size:10px;padding:1px 5px;border-radius:4px}
 .dlg{position:fixed;inset:0;background:#000b;z-index:20;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
 .dlg>div{background:var(--sf);border-radius:14px;padding:16px;max-width:640px;width:100%;display:flex;gap:16px;flex-wrap:wrap;max-height:95vh;overflow:auto}
 .dlg img{width:240px;max-width:100%;border-radius:8px;align-self:flex-start}
@@ -33,75 +36,142 @@ table{border-collapse:collapse;font-size:13px}td{padding:3px 10px 3px 0;border-b
 <body>
 <header>
   <h1>Collectionneur · test des données (session 1)</h1>
-  <select id="lang">
-    <option value="fr">Français</option>
-    <option value="en">English</option>
-    <option value="ja">日本語</option>
-    <option value="zh-tw">中文（繁體）</option>
-    <option value="zh-cn">中文（简体） – bientôt</option>
-    <option value="ko">한국어 – bientôt</option>
-  </select>
-  <button id="rev">Inverser l’ordre</button>
+  <label class="mut">Langue des cartes
+    <select id="lang">
+      <option value="fr">Français</option>
+      <option value="en">Anglais</option>
+      <option value="ja">Japonais</option>
+      <option value="zh-tw">Chinois traditionnel</option>
+    </select>
+  </label>
 </header>
 <main id="m"></main>
 <div id="dlg"></div>
 <script>
-const API='https://api.tcgdex.net/v2/';
+const API='https://api.tcgdex.net/v2/',AS='https://assets.tcgdex.net/';
 const $=id=>document.getElementById(id);
-let lang='fr',rev=false,cache=null;
+const LANGS=['fr','en','ja','zh-tw'];
+let lang='fr',token=0,META=[],N={},SN={},CC={},LB={};
+const D={};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const eur=n=>typeof n==='number'?n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €':'–';
 const usd=n=>typeof n==='number'?n.toFixed(2)+' $':'–';
+const fdate=d=>d?d.split('-').reverse().join('/'):'date inconnue';
 async function j(u){const r=await fetch(u);if(!r.ok)throw new Error(r.status+' '+u);return r.json()}
-function fail(e){$('m').innerHTML=`<div class="err"><b>Impossible de charger les données.</b><br>Détail : ${e.message}<br><br>Si cette langue n’est pas encore complète sur TCGdex, essaie le français ou l’anglais. Sinon, envoie-moi ce message.</div>`}
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fail(e){$('m').innerHTML=`<div class="err"><b>Impossible de charger les données.</b><br>Détail : ${esc(e.message)}<br><br>Envoie-moi ce message si le problème persiste.</div>`}
+function getSet(l,id){const k=l+':'+id;return D[k]||(D[k]=j(`${API}${l}/sets/${encodeURIComponent(id)}`).catch(()=>null))}
+async function pool(items,n,fn){let i=0;await Promise.all(Array.from({length:n},async()=>{while(i<items.length){const x=items[i++];await fn(x)}}))}
+const isPromo=(id,name)=>/promo|black star|プロモ|促銷|^pop\d|^mcd/i.test(id+' '+name)||/^[a-z]+p$/i.test(id)||/[-_]p$/i.test(id);
+const uniq=a=>[...new Set(a)];
 
+/* images avec solutions de secours : on essaie plusieurs langues */
+function imgTag(list,name,cls){
+  return `<img ${cls?`class="${cls}" `:''}loading="lazy" src="${list[0].split('|')[1]}" data-c="${list.join(' ')}" data-i="0" alt="${esc(name)}">`;
+}
+document.addEventListener('error',e=>{
+  const im=e.target;if(!im.dataset||!im.dataset.c)return;
+  const list=im.dataset.c.split(' '),i=+im.dataset.i+1;
+  if(i<list.length){im.dataset.i=i;im.src=list[i].split('|')[1]}
+  else im.outerHTML=im.closest('.set')?`<div class="lg">${esc(im.alt)}</div>`:`<div class="ph">${esc(im.alt)}</div>`;
+},true);
+document.addEventListener('load',e=>{
+  const im=e.target;if(!im.dataset||!im.dataset.c)return;
+  const f=im.closest('figure');if(!f)return;
+  const l=im.dataset.c.split(' ')[+im.dataset.i].split('|')[0];
+  if(l!==lang)f.dataset.b=l.toUpperCase();else delete f.dataset.b;
+},true);
+const logoList=(id,serie)=>uniq([...(LB[id]?[`${lang}|${LB[id]}.webp`]:[]),...uniq([lang,...LANGS]).map(l=>`${l}|${AS}${l}/${serie}/${id}/logo.webp`),`univ|${AS}univ/${serie}/${id}/symbol.webp`]);
+
+/* liste des extensions */
 async function loadSets(){
+  const my=++token;
   $('m').innerHTML='<p class="mut">Chargement des extensions…</p>';
   try{
-    if(!cache||cache.lang!==lang){
-      const series=await j(`${API}${lang}/series`);
-      const det=await Promise.all(series.map(s=>j(`${API}${lang}/series/${s.id}`).catch(()=>null)));
-      cache={lang,series:det.filter(Boolean)};
-      if(!cache.series.length)throw new Error('aucune série reçue');
+    const [ls,fs,es,fse,ese]=await Promise.all([j(`${API}${lang}/sets`),j(`${API}fr/sets`).catch(()=>[]),j(`${API}en/sets`).catch(()=>[]),j(`${API}fr/series`).catch(()=>[]),j(`${API}en/series`).catch(()=>[])]);
+    N={};SN={};CC={};LB={};
+    es.forEach(s=>N[s.id]=s.name);fs.forEach(s=>N[s.id]=s.name);
+    ese.forEach(s=>SN[s.id]=s.name);fse.forEach(s=>SN[s.id]=s.name);
+    ls.forEach(s=>{CC[s.id]=s.cardCount?.total;if(s.logo)LB[s.id]=s.logo});
+    let meta=null;
+    try{meta=JSON.parse(localStorage.getItem('meta3-'+lang))}catch(e){}
+    if(!meta||meta.length!==ls.length){
+      meta=[];let done=0;
+      await pool(ls,10,async s=>{
+        if(my!==token)return;
+        const d=await getSet(lang,s.id);
+        meta.push({id:s.id,serie:d?.serie?.id||'autres',date:d?.releaseDate||''});
+        done++;if(done%5===0&&my===token)$('m').innerHTML=`<p class="mut">Lecture des dates de sortie… ${done} / ${ls.length}<br>(la première fois seulement, ensuite c’est mémorisé)</p>`;
+      });
+      if(my!==token)return;
+      try{localStorage.setItem('meta3-'+lang,JSON.stringify(meta))}catch(e){}
     }
-    renderSets();
+    META=meta;renderSets();
   }catch(e){fail(e)}
 }
-function renderSets(){
-  const list=cache.series.slice();if(rev)list.reverse();
-  $('m').innerHTML=list.map(s=>{
-    const sets=(s.sets||[]).slice();if(rev)sets.reverse();
-    return `<h2>${esc(s.name)} <small class="mut">(${sets.length} extensions)</small></h2><div class="sets">${sets.map(x=>`<div class="set" onclick="openSet('${x.id}')">${x.logo?`<img loading="lazy" src="${x.logo}.webp" alt="" onerror="this.remove()">`:''}<b>${esc(x.name)}</b><small>${x.cardCount?.total??'?'} cartes</small></div>`).join('')}</div>`}).join('');
+function group(arr){
+  const g={};arr.forEach(s=>(g[s.serie]??=[]).push(s));
+  return Object.entries(g).map(([k,a])=>{a.sort((x,y)=>y.date.localeCompare(x.date));return{k,a,max:a[0].date}}).sort((x,y)=>y.max.localeCompare(x.max));
 }
+function tile(s){
+  const name=N[s.id]||s.id.toUpperCase();
+  return `<div class="set" onclick="openSet('${s.id}')">${imgTag(logoList(s.id,s.serie),name)}<b>${esc(name)}</b><small>${fdate(s.date)}${CC[s.id]?' · '+CC[s.id]+' cartes':''}</small></div>`;
+}
+function renderSets(){
+  const all=META.map(x=>({...x,promo:isPromo(x.id,N[x.id]||'')}));
+  const sn=k=>SN[k]||k.toUpperCase();
+  const sec=(g,pre)=>g.map(x=>`<h2>${pre}${esc(sn(x.k))} <small class="mut">(${x.a.length})</small></h2><div class="sets">${x.a.map(tile).join('')}</div>`).join('');
+  const main=all.filter(s=>!s.promo),pro=all.filter(s=>s.promo);
+  $('m').innerHTML=sec(group(main),'')+(pro.length?`<h2 class="promo">Promos</h2>`+sec(group(pro),'Promos · '):'');
+  window.scrollTo(0,0);
+}
+
+/* une extension */
 async function openSet(id){
   $('m').innerHTML='<p class="mut">Chargement des cartes…</p>';
   try{
-    const s=await j(`${API}${lang}/sets/${id}`);
-    const cards=s.cards||[];
+    const ls=uniq([lang,'fr','en']);
+    const det={};(await Promise.all(ls.map(l=>getSet(l,id)))).forEach((d,i)=>det[ls[i]]=d);
+    const base=det[lang]||det.fr||det.en;if(!base)throw new Error('extension introuvable : '+id);
+    const serie=base.serie?.id||'';
+    const map={};
+    ls.forEach(l=>(det[l]?.cards||[]).forEach(c=>{(map[c.localId]??={})[l]=c}));
+    const ids=Object.keys(map).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+    const name=N[id]||id.toUpperCase();
+    const figs=ids.map(lid=>{
+      const m=map[lid],cn=m.fr?.name||m.en?.name||'Carte '+lid;
+      const list=[];
+      uniq([lang,...LANGS]).forEach(l=>{const im=m[l]?.image;if(im)list.push(`${l}|${im}/low.webp`);list.push(`${l}|${AS}${l}/${serie}/${id}/${lid}/low.webp`)});
+      const cid=(m[lang]||m.fr||m.en).id;
+      return `<figure onclick="openCard('${cid}',this)">${imgTag(uniq(list),cn)}<figcaption>${esc(lid)} · ${esc(cn)}</figcaption></figure>`;
+    }).join('');
     $('m').innerHTML=`<p><button onclick="renderSets()">← Toutes les extensions</button></p>
-    <h2>${esc(s.name)}</h2><p class="mut">Sortie : ${esc(s.releaseDate||'inconnue')} · ${cards.length} cartes · identifiant : ${esc(s.id)}</p>
-    <div class="cards">${cards.map(c=>`<figure onclick="openCard('${c.id}')">${c.image?`<img loading="lazy" src="${c.image}/low.webp" alt="${esc(c.name)}" onerror="this.outerHTML='<div class=ph>${esc(c.name)}</div>'">`:`<div class="ph">${esc(c.name)}</div>`}<figcaption>${esc(c.localId)} · ${esc(c.name)}</figcaption></figure>`).join('')}</div>`;
+    <h2>${esc(name)}</h2><p class="mut">Sortie : ${fdate(base.releaseDate)} · ${ids.length} cartes · identifiant : ${esc(id)}<br>Un badge FR / EN / JA sur une carte indique que son image vient d’une autre langue.</p>
+    <div class="cards">${figs}</div>`;
     window.scrollTo(0,0);
   }catch(e){fail(e)}
 }
-async function openCard(id){
-  try{
-    const c=await j(`${API}${lang}/cards/${id}`);
-    const cm=c.pricing?.cardmarket,tp=c.pricing?.tcgplayer;
-    const rows=[];
-    if(cm){rows.push(['Cardmarket, tendance',eur(cm.trend)],['Cardmarket, moyenne 30 j',eur(cm.avg30)],['Cardmarket, le plus bas',eur(cm.low)]);
-      if(cm['trend-holo']!=null)rows.push(['Cardmarket holo, tendance',eur(cm['trend-holo'])])}
-    if(tp){for(const v of ['normal','reverse','holo']){if(tp[v])rows.push(['TCGplayer '+v+', marché',usd(tp[v].marketPrice)])}}
-    $('dlg').innerHTML=`<div class="dlg" onclick="if(event.target===this)this.remove()"><div>
-      ${c.image?`<img src="${c.image}/high.webp" alt="${esc(c.name)}">`:''}
-      <section style="flex:1;min-width:200px"><h2 style="margin-top:0">${esc(c.name)}</h2>
-      <p class="mut">${esc(c.set?.name)} · n° ${esc(c.localId)}/${esc(c.set?.cardCount?.official??'?')}<br>Rareté : ${esc(c.rarity||'inconnue')}<br>Identifiant : ${esc(c.id)}</p>
-      ${rows.length?`<table>${rows.map(r=>`<tr><td>${r[0]}</td><td><b>${r[1]}</b></td></tr>`).join('')}</table>`:'<p class="mut">Aucun prix disponible pour cette carte.</p>'}
-      <p><button class="p" onclick="document.querySelector('.dlg').remove()">Fermer</button></p></section></div></div>`;
-  }catch(e){fail(e)}
+
+/* une carte */
+async function openCard(id,fig){
+  const im=fig.querySelector('img');
+  const src=im?im.currentSrc||im.src:'';
+  let card=null,pricing=null;
+  for(const l of uniq(['fr','en',lang])){
+    try{const c=await j(`${API}${l}/cards/${encodeURIComponent(id)}`);card=card||c;if(!pricing&&c.pricing&&(c.pricing.cardmarket||c.pricing.tcgplayer))pricing=c.pricing}catch(e){}
+    if(card&&pricing)break;
+  }
+  const rows=[],cm=pricing?.cardmarket,tp=pricing?.tcgplayer;
+  if(cm){rows.push(['Cardmarket, tendance',eur(cm.trend)],['Cardmarket, moyenne 30 j',eur(cm.avg30)],['Cardmarket, le plus bas',eur(cm.low)]);if(cm['trend-holo']!=null)rows.push(['Cardmarket holo, tendance',eur(cm['trend-holo'])])}
+  if(tp)for(const v of ['normal','reverse','holo'])if(tp[v])rows.push(['TCGplayer '+v+', marché',usd(tp[v].marketPrice)]);
+  const name=card?.name||fig.querySelector('figcaption').textContent;
+  $('dlg').innerHTML=`<div class="dlg" onclick="if(event.target===this)this.remove()"><div>
+    ${src?`<img src="${src.replace('/low.webp','/high.webp')}" onerror="this.onerror=null;this.src='${src}'" alt="${esc(name)}">`:''}
+    <section style="flex:1;min-width:200px"><h2 style="margin-top:0">${esc(name)}</h2>
+    <p class="mut">${esc(card?.set?.name||'')} · n° ${esc(card?.localId||'')}<br>Rareté : ${esc(card?.rarity||'inconnue')}<br>Identifiant : ${esc(id)}</p>
+    ${rows.length?`<table>${rows.map(r=>`<tr><td>${r[0]}</td><td><b>${r[1]}</b></td></tr>`).join('')}</table><p class="mut">Prix par carte, pas par langue.</p>`:'<p class="mut">Aucun prix disponible pour cette carte.</p>'}
+    <p><button class="p" onclick="document.querySelector('.dlg').remove()">Fermer</button></p></section></div></div>`;
 }
 $('lang').onchange=e=>{lang=e.target.value;loadSets()};
-$('rev').onclick=()=>{rev=!rev;if(cache)renderSets()};
 loadSets();
 </script>
 </body>
