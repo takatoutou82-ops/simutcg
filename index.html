@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collectionneur – session 1 : test des données</title>
+<style>
+:root{--bg:#f1f4f2;--sf:#fff;--ink:#16231e;--mut:#5d6f67;--ln:#cbd6cf;--ac:#16231e;--act:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#13201b;--sf:#1c2d26;--ink:#f1ece0;--mut:#9db0a6;--ln:#2e443b;--ac:#e8b84a;--act:#13201b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--ln);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0;flex:1;min-width:200px}
+h2{margin:22px 0 8px;font-size:17px}
+select,button{font:inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--ln);background:var(--sf);color:var(--ink);cursor:pointer}
+button.p{background:var(--ac);color:var(--act);border:0}
+main{padding:14px 16px 50px;max-width:1100px;margin:0 auto}
+.sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.set{background:var(--sf);border:1px solid var(--ln);border-radius:10px;padding:10px;text-align:center;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px}
+.set img{max-width:100%;height:46px;object-fit:contain}
+.set small,.mut{color:var(--mut)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.cards img,.ph{width:100%;aspect-ratio:63/88;border-radius:6px;background:var(--sf);cursor:pointer;display:block}
+.ph{border:2px dashed var(--ln);display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;padding:6px;color:var(--mut)}
+.cards figure{margin:0;font-size:12px;text-align:center}
+.dlg{position:fixed;inset:0;background:#000b;z-index:20;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.dlg>div{background:var(--sf);border-radius:14px;padding:16px;max-width:640px;width:100%;display:flex;gap:16px;flex-wrap:wrap;max-height:95vh;overflow:auto}
+.dlg img{width:240px;max-width:100%;border-radius:8px;align-self:flex-start}
+table{border-collapse:collapse;font-size:13px}td{padding:3px 10px 3px 0;border-bottom:1px solid var(--ln)}
+.err{background:var(--sf);border:1px solid #c0392b;border-radius:10px;padding:12px;max-width:70ch}
+</style>
+</head>
+<body>
+<header>
+  <h1>Collectionneur · test des données (session 1)</h1>
+  <select id="lang">
+    <option value="fr">Français</option>
+    <option value="en">English</option>
+    <option value="ja">日本語</option>
+    <option value="zh-tw">中文（繁體）</option>
+    <option value="zh-cn">中文（简体） – bientôt</option>
+    <option value="ko">한국어 – bientôt</option>
+  </select>
+  <button id="rev">Inverser l’ordre</button>
+</header>
+<main id="m"></main>
+<div id="dlg"></div>
+<script>
+const API='https://api.tcgdex.net/v2/';
+const $=id=>document.getElementById(id);
+let lang='fr',rev=false,cache=null;
+const eur=n=>typeof n==='number'?n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €':'–';
+const usd=n=>typeof n==='number'?n.toFixed(2)+' $':'–';
+async function j(u){const r=await fetch(u);if(!r.ok)throw new Error(r.status+' '+u);return r.json()}
+function fail(e){$('m').innerHTML=`<div class="err"><b>Impossible de charger les données.</b><br>Détail : ${e.message}<br><br>Si cette langue n’est pas encore complète sur TCGdex, essaie le français ou l’anglais. Sinon, envoie-moi ce message.</div>`}
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadSets(){
+  $('m').innerHTML='<p class="mut">Chargement des extensions…</p>';
+  try{
+    if(!cache||cache.lang!==lang){
+      const series=await j(`${API}${lang}/series`);
+      const det=await Promise.all(series.map(s=>j(`${API}${lang}/series/${s.id}`).catch(()=>null)));
+      cache={lang,series:det.filter(Boolean)};
+      if(!cache.series.length)throw new Error('aucune série reçue');
+    }
+    renderSets();
+  }catch(e){fail(e)}
+}
+function renderSets(){
+  const list=cache.series.slice();if(rev)list.reverse();
+  $('m').innerHTML=list.map(s=>{
+    const sets=(s.sets||[]).slice();if(rev)sets.reverse();
+    return `<h2>${esc(s.name)} <small class="mut">(${sets.length} extensions)</small></h2><div class="sets">${sets.map(x=>`<div class="set" onclick="openSet('${x.id}')">${x.logo?`<img loading="lazy" src="${x.logo}.webp" alt="" onerror="this.remove()">`:''}<b>${esc(x.name)}</b><small>${x.cardCount?.total??'?'} cartes</small></div>`).join('')}</div>`}).join('');
+}
+async function openSet(id){
+  $('m').innerHTML='<p class="mut">Chargement des cartes…</p>';
+  try{
+    const s=await j(`${API}${lang}/sets/${id}`);
+    const cards=s.cards||[];
+    $('m').innerHTML=`<p><button onclick="renderSets()">← Toutes les extensions</button></p>
+    <h2>${esc(s.name)}</h2><p class="mut">Sortie : ${esc(s.releaseDate||'inconnue')} · ${cards.length} cartes · identifiant : ${esc(s.id)}</p>
+    <div class="cards">${cards.map(c=>`<figure onclick="openCard('${c.id}')">${c.image?`<img loading="lazy" src="${c.image}/low.webp" alt="${esc(c.name)}" onerror="this.outerHTML='<div class=ph>${esc(c.name)}</div>'">`:`<div class="ph">${esc(c.name)}</div>`}<figcaption>${esc(c.localId)} · ${esc(c.name)}</figcaption></figure>`).join('')}</div>`;
+    window.scrollTo(0,0);
+  }catch(e){fail(e)}
+}
+async function openCard(id){
+  try{
+    const c=await j(`${API}${lang}/cards/${id}`);
+    const cm=c.pricing?.cardmarket,tp=c.pricing?.tcgplayer;
+    const rows=[];
+    if(cm){rows.push(['Cardmarket, tendance',eur(cm.trend)],['Cardmarket, moyenne 30 j',eur(cm.avg30)],['Cardmarket, le plus bas',eur(cm.low)]);
+      if(cm['trend-holo']!=null)rows.push(['Cardmarket holo, tendance',eur(cm['trend-holo'])])}
+    if(tp){for(const v of ['normal','reverse','holo']){if(tp[v])rows.push(['TCGplayer '+v+', marché',usd(tp[v].marketPrice)])}}
+    $('dlg').innerHTML=`<div class="dlg" onclick="if(event.target===this)this.remove()"><div>
+      ${c.image?`<img src="${c.image}/high.webp" alt="${esc(c.name)}">`:''}
+      <section style="flex:1;min-width:200px"><h2 style="margin-top:0">${esc(c.name)}</h2>
+      <p class="mut">${esc(c.set?.name)} · n° ${esc(c.localId)}/${esc(c.set?.cardCount?.official??'?')}<br>Rareté : ${esc(c.rarity||'inconnue')}<br>Identifiant : ${esc(c.id)}</p>
+      ${rows.length?`<table>${rows.map(r=>`<tr><td>${r[0]}</td><td><b>${r[1]}</b></td></tr>`).join('')}</table>`:'<p class="mut">Aucun prix disponible pour cette carte.</p>'}
+      <p><button class="p" onclick="document.querySelector('.dlg').remove()">Fermer</button></p></section></div></div>`;
+  }catch(e){fail(e)}
+}
+$('lang').onchange=e=>{lang=e.target.value;loadSets()};
+$('rev').onclick=()=>{rev=!rev;if(cache)renderSets()};
+loadSets();
+</script>
+</body>
+</html>
